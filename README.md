@@ -4,6 +4,8 @@ A lightweight RTSP camera health-check tool built with Bash, FFmpeg, and FFprobe
 
 `rtsp-check` helps quickly determine whether an RTSP camera stream is reachable, authenticated, stable, and suitable for further troubleshooting.
 
+It supports both single-camera diagnostics and multi-camera batch checks.
+
 ## Features
 
 - RTSP reachability check
@@ -20,7 +22,13 @@ A lightweight RTSP camera health-check tool built with Bash, FFmpeg, and FFprobe
 - 30-second continuity test
 - Hidden password input
 - JSON output mode
+- Password input through stdin for automation
+- Multi-camera batch testing
+- Per-camera RTSP paths
+- Previous-password reuse in batch mode
+- Batch summary table
 - Final health status
+- GitHub Actions Bash syntax validation
 
 ## Requirements
 
@@ -39,7 +47,7 @@ sudo apt update
 sudo apt install ffmpeg coreutils gawk
 ```
 
-## Usage
+## Single Camera Usage
 
 Make the script executable:
 
@@ -56,7 +64,7 @@ Run a normal health check:
 Example:
 
 ```bash
-./rtsp-check.sh 192.168.1.16 admin /streaming/channels/101
+./rtsp-check.sh xxx.xxx.x.xx admin /streaming/channels/101
 ```
 
 The password is requested securely and is not included in the command line.
@@ -69,7 +77,7 @@ Confirm password:
 
 RTSP CHECK
 ==========
-Camera: 192.168.1.16
+Camera: xxx.xxx.x.xx
 Path: /streaming/channels/101
 
 Probing stream...
@@ -107,22 +115,22 @@ Transport note: UDP unavailable, TCP healthy
 Use `--json`:
 
 ```bash
-./rtsp-check.sh --json 192.168.1.16 admin /streaming/channels/101
+./rtsp-check.sh --json xxx.xxx.x.xx admin /streaming/channels/101
 ```
 
-The tool displays test progress while keeping the JSON output clean.
+The tool displays progress messages while keeping stdout clean for JSON output.
 
-Save the report to a file:
+Save a report:
 
 ```bash
-./rtsp-check.sh --json 192.168.1.16 admin /streaming/channels/101 > report.json
+./rtsp-check.sh --json xxx.xxx.x.xx admin /streaming/channels/101 > report.json
 ```
 
 Example JSON:
 
 ```json
 {
-  "camera": "192.168.1.16",
+  "camera": "xxx.xxx.x.xx",
   "path": "/streaming/channels/101",
   "reachable": true,
   "authentication": "ok",
@@ -147,9 +155,130 @@ Example JSON:
 }
 ```
 
+## Password Input From stdin
+
+For automation or scripts, passwords can be supplied through stdin:
+
+```bash
+printf '%s\n' 'PASSWORD' | \
+./rtsp-check.sh \
+  --json \
+  --password-stdin \
+  xxx.xxx.x.xx \
+  admin \
+  /streaming/channels/101
+```
+
+This mode is used internally by the batch checker.
+
+Avoid storing real passwords directly in scripts or committed files.
+
+## Batch Camera Testing
+
+`rtsp-batch.sh` can test multiple cameras sequentially.
+
+Make it executable:
+
+```bash
+chmod +x rtsp-batch.sh
+```
+
+Create a camera list:
+
+```text
+xxx.xxx.x.xx,admin,/streaming/channels/101
+xxx.xxx.x.xx,admin,/profile1
+xxx.xxx.x.xx,admin,/profile1
+```
+
+Save it as:
+
+```text
+cameras.txt
+```
+
+`cameras.txt` is ignored by Git so internal camera addresses are not accidentally committed.
+
+Run the batch checker:
+
+```bash
+./rtsp-batch.sh cameras.txt
+```
+
+The script asks for each camera password securely.
+
+If the next camera uses the same password, press Enter to reuse the previous password:
+
+```text
+Password for admin@xxx.xxx.x.xx [Enter = reuse previous password]:
+```
+
+## Batch Output
+
+Example:
+
+```text
+RTSP BATCH CHECK
+================
+
+Camera: xxx.xxx.x.xx
+Path: /streaming/channels/101
+Password for admin@xxx.xxx.x.xx:
+
+Result: healthy
+Reachable: true
+Authentication: ok
+Codec: H.265 / HEVC
+FPS: 30
+TCP: ok
+UDP: timeout
+-----------------------------
+
+Camera: xxx.xxx.x.xx
+Path: /profile1
+Password for admin@xxx.xxx.x.xx [Enter = reuse previous password]:
+
+Result: healthy
+Reachable: true
+Authentication: ok
+Codec: H.264 / AVC
+FPS: 29.97
+TCP: ok
+UDP: timeout
+-----------------------------
+```
+
+The final batch summary makes larger camera sets easier to scan:
+
+```text
+BATCH SUMMARY
+=============
+
+CAMERA           RESULT         REASON                   CODEC            FPS      TCP        UDP
+---------------  -------------  -----------------------  ---------------  -------  ---------  ---------
+xxx.xxx.x.xx     healthy        -                        H.265 / HEVC     30       ok         timeout
+xxx.xxx.x.xx     healthy        -                        H.264 / AVC      29.97    ok         timeout
+xxx.xxx.x.xx     check_stream   authentication_failed    unknown          unknown  unknown    unknown
+```
+
+## Camera-Specific RTSP Paths
+
+Different camera vendors or models may use different RTSP paths.
+
+Examples:
+
+```text
+/streaming/channels/101
+/profile1
+```
+
+A camera can be reachable and authenticated while still returning a stream error if the RTSP path is incorrect.
+
+Always use the RTSP path supported by the specific camera.
+
 ## Health Logic
 
-The stream is marked `HEALTHY` when:
+A stream is marked `HEALTHY` when:
 
 - Initial RTSP probe succeeds
 - Authentication succeeds
@@ -161,30 +290,91 @@ The stream is marked `HEALTHY` when:
 
 UDP availability is reported separately and does not automatically mark an otherwise healthy TCP stream as unhealthy.
 
+## Common Results
+
+### HEALTHY
+
+The stream passed the main RTSP, stability, TCP, and continuity checks.
+
+### authentication_failed
+
+The camera responded but rejected the supplied credentials.
+
+### camera_unreachable
+
+The target could not be reached over the network.
+
+### probe_failed
+
+The initial RTSP probe failed for a reason that was not specifically classified.
+
+Possible causes include:
+
+- Incorrect RTSP path
+- Unsupported stream configuration
+- RTSP server-specific behavior
+- Network or transport issues
+
 ## Security
 
-Passwords are requested using hidden terminal input.
+Passwords are requested through hidden terminal input.
 
-Avoid placing RTSP credentials directly in command-line arguments, scripts, logs, screenshots, or Git commits.
+Avoid placing RTSP credentials directly in:
+
+- Command-line history
+- Scripts
+- Git commits
+- Screenshots
+- Logs
+- `cameras.txt`
+
+`cameras.txt` and generated report files should remain excluded from source control.
 
 ## Exit Codes
 
 - `0` - check completed successfully
 - `1` - stream/probe health failure
-- `2` - invalid usage or password confirmation failure
+- `2` - invalid usage, empty password, or password confirmation failure
+
+## Continuous Integration
+
+GitHub Actions runs a Bash syntax check on every push and pull request to `main`.
+
+The workflow validates:
+
+```bash
+bash -n rtsp-check.sh
+```
+
+## License
+
+This project is licensed under the MIT License.
+
+See:
+
+```text
+LICENSE
+```
 
 ## Project Status
 
-Current version: **v0.2**
+Current release:
 
-The project is currently focused on Linux/WSL environments.
+```text
+v0.2.0
+```
+
+The project currently targets Linux and WSL environments.
 
 ## Future Ideas
 
-- Configurable test duration
-- Multiple-camera batch testing
-- CSV output
+- `--summary-only` batch mode
+- CSV batch reports
+- Configurable stability duration
+- Configurable continuity duration
+- Multiple-camera parallel testing
 - Prometheus-compatible metrics
 - Docker image
-- Automated tests
-- GitHub Actions
+- ShellCheck integration
+- More detailed RTSP failure classification
+- Automated functional tests
