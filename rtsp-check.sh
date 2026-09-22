@@ -7,19 +7,32 @@ set -u
 # =========================================================
 
 JSON_MODE=false
+PASSWORD_STDIN=false
 
-if [ "${1:-}" = "--json" ]; then
-    JSON_MODE=true
-    shift
-fi
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --json)
+            JSON_MODE=true
+            shift
+            ;;
+        --password-stdin)
+            PASSWORD_STDIN=true
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
 
 if [ $# -lt 3 ]; then
     echo "Usage:"
-    echo "  ./rtsp-check.sh [--json] <ip> <username> <path>"
+    echo "  ./rtsp-check.sh [--json] [--password-stdin] <ip> <username> <path>"
     echo
     echo "Examples:"
     echo "  ./rtsp-check.sh 192.168.1.16 admin /streaming/channels/101"
     echo "  ./rtsp-check.sh --json 192.168.1.16 admin /streaming/channels/101"
+    echo "  printf '%s\n' 'password' | ./rtsp-check.sh --json --password-stdin 192.168.1.16 admin /streaming/channels/101"
     exit 2
 fi
 
@@ -61,26 +74,49 @@ json_escape() {
 # PASSWORD
 # =========================================================
 
-read -r -s -p "Password: " PASSWORD
-echo >&2
+if [ "$PASSWORD_STDIN" = true ]; then
 
-read -r -s -p "Confirm password: " PASSWORD_CONFIRM
-echo >&2
+    IFS= read -r PASSWORD
 
-if [ "$PASSWORD" != "$PASSWORD_CONFIRM" ]; then
+    if [ -z "${PASSWORD:-}" ]; then
+        if [ "$JSON_MODE" = true ]; then
+            cat <<EOF
+{
+  "result": "error",
+  "reason": "empty_password"
+}
+EOF
+        else
+            echo "Password cannot be empty."
+        fi
 
-    if [ "$JSON_MODE" = true ]; then
-        cat <<EOF
+        exit 2
+    fi
+
+else
+
+    read -r -s -p "Password: " PASSWORD
+    echo >&2
+
+    read -r -s -p "Confirm password: " PASSWORD_CONFIRM
+    echo >&2
+
+    if [ "$PASSWORD" != "$PASSWORD_CONFIRM" ]; then
+
+        if [ "$JSON_MODE" = true ]; then
+            cat <<EOF
 {
   "result": "error",
   "reason": "passwords_do_not_match"
 }
 EOF
-    else
-        echo "Passwords do not match."
+        else
+            echo "Passwords do not match."
+        fi
+
+        exit 2
     fi
 
-    exit 2
 fi
 
 

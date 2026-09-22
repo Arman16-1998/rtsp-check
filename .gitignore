@@ -2,3 +2,4 @@ report.json
 *.log
 *.tmp
 .DS_Store
+cameras.txt
