@@ -1,0 +1,4 @@
+report.json
+*.log
+*.tmp
+.DS_Store
